@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     yield
     if db.pool:
         await db.pool.close()
-        print("✅ Database connections closed.")
+        print("✅ Database connection closed.")
 
 app = FastAPI(title="CarX Standalone API", lifespan=lifespan)
 
@@ -48,7 +48,7 @@ async def verify_api_key(api_key: str = Depends(api_key_header)):
 class CreateAccountRequest(BaseModel):
     email: EmailStr = Field(..., description="Target email address to register")
     password: Optional[str] = Field(None, description="Account password (auto-generated if omitted)")
-    mod_id: int = Field(..., description="Mod Package ID to clone")
+    account_id: str = Field(..., description="The UUID of the package in the accounts table")
 
 class InjectCarRequest(BaseModel):
     email: EmailStr = Field(..., description="Target Account Email")
@@ -81,28 +81,21 @@ async def health_check():
 
 @app.post("/api/v1/create-account", dependencies=[Depends(verify_api_key)])
 async def api_create_account(payload: CreateAccountRequest):
-    mod = await db.get_mod_by_id(payload.mod_id)
-    if not mod:
-        raise HTTPException(status_code=404, detail="Selected Mod Package not found.")
-    if not mod.get('src_email'):
-        raise HTTPException(status_code=400, detail="Mod configuration lacks source account data.")
+    # Query your actual 'accounts' table
+    package = await db.get_account_by_id(payload.account_id)
+    if not package:
+        raise HTTPException(status_code=404, detail="Selected package ID not found in database accounts table.")
+    
+    snapshot_url = package.get('snapshot_url')
+    if not snapshot_url or not snapshot_url.startswith("http"):
+        raise HTTPException(status_code=400, detail="The selected package lacks a valid Supabase snapshot_url.")
 
     target_email = payload.email.strip()
     target_password = payload.password.strip() if payload.password else secrets.token_hex(5)
 
     try:
-        if mod["src_email"] and mod["src_email"].startswith("http"):
-            await carx_cloner.execute_clone_from_snapshot(mod["src_email"], target_email, target_password)
-        else:
-            await carx_cloner.execute_clone(
-                src_email=mod['src_email'],
-                src_pass=mod['src_pass'],
-                src_dev=mod['src_dev_id'],
-                src_carx=mod.get('src_carx_id', ''),
-                tgt_email=target_email,
-                tgt_pass=target_password
-            )
-        await db.create_account_creation_job("WEBSITE_API", target_email, target_password, mod['id'])
+        # Clone using snapshot URL
+        await carx_cloner.execute_clone_from_snapshot(snapshot_url, target_email, target_password)
         return {
             "status": "success",
             "account_credentials": {"email": target_email, "password": target_password}
