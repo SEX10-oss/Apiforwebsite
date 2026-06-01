@@ -20,6 +20,7 @@ from config import WORKER_SECRET_TOKEN
 
 # Supabase catalogs
 CAR_LIST_URL = "https://rznrrywtfiyehwkfntfj.supabase.co/storage/v1/object/public/profiles/carlist.json"
+CAR_IMAGES_URL = "https://rznrrywtfiyehwkfntfj.supabase.co/storage/v1/object/public/profiles/car_images.json"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -109,7 +110,6 @@ async def api_create_account(payload: CreateAccountRequest):
 
 @app.post("/api/v1/get-garage", dependencies=[Depends(verify_api_key)])
 async def api_get_garage(payload: GetGarageRequest):
-    """Logs into the player's account, decrypts their garage, and returns a clean list of owned cars."""
     dev_id = uuid.uuid4().hex
     try:
         async with httpx.AsyncClient(http2=True, timeout=60.0) as client:
@@ -128,6 +128,59 @@ async def api_get_garage(payload: GetGarageRequest):
             return {"status": "success", "cars": owned_cars}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to retrieve garage inventory: {str(e)}")
+
+# --- GET MASTER VEHICLE CATALOG ROUTE ---
+
+@app.get("/api/v1/master-catalog", dependencies=[Depends(verify_api_key)])
+async def api_get_master_catalog():
+    """Downloads and parses the master vehicle database (carlist.json & car_images.json)."""
+    try:
+        async with httpx.AsyncClient() as client:
+            # 1. Download raw game data list
+            response_list = await client.get(CAR_LIST_URL)
+            if response_list.status_code != 200:
+                raise Exception("Failed to retrieve master vehicle catalog.")
+            
+            content = response_list.text.strip()
+            if not content.startswith("{"): content = "{" + content
+            if not content.endswith("}"): content = content + "}"
+            raw_car_data = json.loads(content)
+
+            # 2. Download name/image mapping
+            car_maps = {}
+            response_maps = await client.get(CAR_IMAGES_URL)
+            if response_maps.status_code == 200:
+                try:
+                    car_maps = response_maps.json()
+                except Exception:
+                    pass
+
+            # 3. Scan and extract pristine cars
+            car_registry = []
+            
+            def scan(d):
+                if isinstance(d, dict):
+                    for k, v in d.items():
+                        if k.isdigit() and isinstance(v, dict) and ("tuning" in v or "body_part_set" in v):
+                            mapping = car_maps.get(k, {})
+                            display_name = mapping.get("name", v.get("__desc_id", f"Car {k}"))
+                            image_url = mapping.get("image_url", "N/A")
+                            
+                            car_registry.append({
+                                "car_id": k,
+                                "name": display_name,
+                                "image_url": image_url
+                            })
+                        else:
+                            scan(v)
+                elif isinstance(d, list):
+                    for item in d:
+                        scan(item)
+            
+            scan(raw_car_data)
+            return {"status": "success", "catalog": car_registry}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load master catalog: {str(e)}")
 
 # --- INJECTION ROUTES ---
 
