@@ -50,6 +50,10 @@ class CreateAccountRequest(BaseModel):
     password: Optional[str] = Field(None, description="Account password (auto-generated if omitted)")
     account_id: str = Field(..., description="The UUID of the package in the accounts table")
 
+class GetGarageRequest(BaseModel):
+    email: EmailStr = Field(..., description="Target Account Email")
+    password: str = Field(..., description="Target Account Password")
+
 class InjectCarRequest(BaseModel):
     email: EmailStr = Field(..., description="Target Account Email")
     password: str = Field(..., description="Target Account Password")
@@ -81,7 +85,6 @@ async def health_check():
 
 @app.post("/api/v1/create-account", dependencies=[Depends(verify_api_key)])
 async def api_create_account(payload: CreateAccountRequest):
-    # Query your actual 'accounts' table
     package = await db.get_account_by_id(payload.account_id)
     if not package:
         raise HTTPException(status_code=404, detail="Selected package ID not found in database accounts table.")
@@ -94,7 +97,6 @@ async def api_create_account(payload: CreateAccountRequest):
     target_password = payload.password.strip() if payload.password else secrets.token_hex(5)
 
     try:
-        # Clone using snapshot URL
         await carx_cloner.execute_clone_from_snapshot(snapshot_url, target_email, target_password)
         return {
             "status": "success",
@@ -102,6 +104,30 @@ async def api_create_account(payload: CreateAccountRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# --- GET GARAGE CARS ROUTE ---
+
+@app.post("/api/v1/get-garage", dependencies=[Depends(verify_api_key)])
+async def api_get_garage(payload: GetGarageRequest):
+    """Logs into the player's account, decrypts their garage, and returns a clean list of owned cars."""
+    dev_id = uuid.uuid4().hex
+    try:
+        async with httpx.AsyncClient(http2=True, timeout=60.0) as client:
+            client.headers.update({"User-Agent": "UnityPlayer/6000.0.64f1", "X-Project": "STREET"})
+            cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
+            profile = carx_cloner.decrypt_payload(cont["compressed_data"])
+            garage = profile["cars"]["items"] if ("cars" in profile and "items" in profile["cars"]) else profile
+            
+            owned_cars = []
+            for c_id, c_data in garage.items():
+                if c_id.isdigit() and isinstance(c_data, dict):
+                    owned_cars.append({
+                        "car_id": c_id,
+                        "name": c_data.get("__desc_id", f"Car {c_id}")
+                    })
+            return {"status": "success", "cars": owned_cars}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to retrieve garage inventory: {str(e)}")
 
 # --- INJECTION ROUTES ---
 
