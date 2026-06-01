@@ -67,6 +67,11 @@ class InjectResourcesRequest(BaseModel):
     gold: Optional[int] = Field(0)
     xp: Optional[int] = Field(0)
 
+class InjectLevelRequest(BaseModel):
+    email: EmailStr = Field(..., description="Target Account Email")
+    password: str = Field(..., description="Target Account Password")
+    xp_amount: Optional[int] = Field(93060, description="The absolute XP value to set for max level")
+
 class InjectNitroRequest(BaseModel):
     email: EmailStr = Field(..., description="Target Account Email")
     password: str = Field(..., description="Target Account Password")
@@ -86,6 +91,7 @@ async def health_check():
 
 @app.post("/api/v1/create-account", dependencies=[Depends(verify_api_key)])
 async def api_create_account(payload: CreateAccountRequest):
+    # Query your actual 'accounts' table
     package = await db.get_account_by_id(payload.account_id)
     if not package:
         raise HTTPException(status_code=404, detail="Selected package ID not found in database accounts table.")
@@ -133,10 +139,8 @@ async def api_get_garage(payload: GetGarageRequest):
 
 @app.get("/api/v1/master-catalog", dependencies=[Depends(verify_api_key)])
 async def api_get_master_catalog():
-    """Downloads and parses the master vehicle database (carlist.json & car_images.json)."""
     try:
         async with httpx.AsyncClient() as client:
-            # 1. Download raw game data list
             response_list = await client.get(CAR_LIST_URL)
             if response_list.status_code != 200:
                 raise Exception("Failed to retrieve master vehicle catalog.")
@@ -146,7 +150,6 @@ async def api_get_master_catalog():
             if not content.endswith("}"): content = content + "}"
             raw_car_data = json.loads(content)
 
-            # 2. Download name/image mapping
             car_maps = {}
             response_maps = await client.get(CAR_IMAGES_URL)
             if response_maps.status_code == 200:
@@ -155,7 +158,6 @@ async def api_get_master_catalog():
                 except Exception:
                     pass
 
-            # 3. Scan and extract pristine cars
             car_registry = []
             
             def scan(d):
@@ -260,6 +262,30 @@ async def api_inject_resources(payload: InjectResourcesRequest):
             if r_up.status_code != 200:
                 raise Exception(r_up.text)
             return {"status": "success", "added": {"silver": payload.silver, "gold": payload.gold, "xp": payload.xp}}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/v1/inject/level", dependencies=[Depends(verify_api_key)])
+async def api_inject_level(payload: InjectLevelRequest):
+    """Directly overrides the player's total account experience value to max (93060)."""
+    dev_id = uuid.uuid4().hex
+    try:
+        async with httpx.AsyncClient(http2=True, timeout=60.0) as client:
+            client.headers.update({"User-Agent": "UnityPlayer/6000.0.64f1", "X-Project": "STREET"})
+            cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
+            profile = carx_cloner.decrypt_payload(cont["compressed_data"])
+            
+            res = profile.get("resources", {})
+            res["experience"] = {"amount": payload.xp_amount}
+            
+            profile["resources"] = res
+            profile["lastSyncTime"] = int(time.time())
+            cont["compressed_data"] = carx_cloner.encrypt_payload_strict(profile)
+            
+            r_up = await client.post(f"{carx_cloner.BASE_SYNC}/profiles", json=cont, headers=h)
+            if r_up.status_code != 200:
+                raise Exception(r_up.text)
+            return {"status": "success", "message": f"Account experience set directly to {payload.xp_amount} (Max Level)."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
