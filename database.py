@@ -14,31 +14,16 @@ async def init_db():
     pool = await asyncpg.create_pool(
         dsn=DATABASE_URL, 
         ssl="require",
-        statement_cache_size=0
+        statement_cache_size=0 # Disables statement caching for PgBouncer compatibility
     )
-    print("📡 Connected to shared PostgreSQL Database Pool.")
+    print("📡 Connected to shared Supabase PostgreSQL Database Pool.")
 
-async def create_account_creation_job(user_psid: str, email: str, password: str, mod_id: int, lang: str = 'en') -> int:
+async def get_account_by_id(account_id: str):
+    """Queries your actual 'accounts' table using the UUID."""
     async with pool.acquire() as conn:
-        query = """
-            INSERT INTO creation_jobs (user_psid, email, password, mod_id, status, lang) 
-            VALUES ($1, $2, $3, $4, 'processing', $5) RETURNING job_id
-        """
-        return await conn.fetchval(query, user_psid, email, password, mod_id, lang)
-
-async def get_mod_by_id(mod_id: int):
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT * FROM mods WHERE id = $1', mod_id)
-        return dict(row) if row else None
-
-async def get_mods_by_price(price: float):
-    async with pool.acquire() as conn:
-        rows = await conn.fetch('SELECT * FROM mods WHERE price BETWEEN $1 AND $2', price - 0.01, price + 0.01)
-        return [dict(row) for row in rows]
-
-async def add_reference(ref: str, user_id: str, mod_id: int):
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO "references" (ref_number, user_id, mod_id, claims_max) 
-            VALUES ($1, $2, $3, 1) ON CONFLICT (ref_number) DO NOTHING
-        """, ref, user_id, mod_id)
+        try:
+            row = await conn.fetchrow('SELECT * FROM accounts WHERE id = $1::uuid', account_id)
+            return dict(row) if row else None
+        except Exception as e:
+            print(f"Error querying accounts table: {e}")
+            return None
