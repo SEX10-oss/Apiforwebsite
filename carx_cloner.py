@@ -28,13 +28,86 @@ def encrypt_payload_strict(profile_dict):
     json_bytes = orjson.dumps(profile_dict)
     return "l84l" + base64.b64encode(b"\x00" + gzip.compress(json_bytes)).decode("utf-8")
 
+def validate_and_repair_profile(prof):
+    """
+    Deep Integrity Checker for API.
+    Scans the overwitten dataset to ensure no missing dependencies crash the game.
+    """
+    print("[API] 🔍 Running Deep Integrity Check on overwritten dataset...")
+    
+    cars_node = prof.get("cars", {})
+    car_items = cars_node.get("items", {})
+    valid_car_ids = list(car_items.keys())
+    
+    # 1. Fix Location Spawns (CRITICAL FOR WIPE & REPLACE)
+    loc_id = prof.get("location_id", "")
+    if loc_id and ("apartment" in loc_id or loc_id in prof.get("real_estates", {})):
+        estates = prof.get("real_estates", {})
+        if loc_id not in estates or not estates.get(loc_id, {}).get("is_bought"):
+            prof["location_id"] = "gas_station_0"
+            print(f"  [API-FIX] Account doesn't own '{loc_id}'. Respawning at gas_station_0.")
+
+    # 2. Fix Current Car ID
+    current_car = str(prof.get("current_car_id", ""))
+    if valid_car_ids and current_car not in valid_car_ids:
+        prof["current_car_id"] = str(valid_car_ids[0])
+        print(f"  [API-FIX] Corrected 'current_car_id' to {valid_car_ids[0]}")
+
+    # 3. Fix Real Estate Parking Slots
+    re_slots = prof.get("real_estate_slots", {})
+    for slot_name, slot_data in re_slots.items():
+        if "car_id" in slot_data and str(slot_data["car_id"]) not in valid_car_ids:
+            print(f"  [API-FIX] Removed phantom car {slot_data['car_id']} from {slot_name}")
+            re_slots[slot_name] = {}
+
+    # 4. Fix Car-to-Real-Estate Mapping
+    c2re = prof.get("car_to_real_estate_slot", {})
+    if "keys" in c2re and "values" in c2re:
+        new_k, new_v = [], []
+        for k, v in zip(c2re["keys"], c2re["values"]):
+            if str(k) in valid_car_ids:
+                new_k.append(k)
+                new_v.append(v)
+        prof["car_to_real_estate_slot"]["keys"] = new_k
+        prof["car_to_real_estate_slot"]["values"] = new_v
+
+    # 5. Fix Car-to-Club Mapping
+    c2club = prof.get("car_to_club", {})
+    if "keys" in c2club and "values" in c2club:
+        new_k, new_v = [], []
+        for k, v in zip(c2club["keys"], c2club["values"]):
+            if str(k) in valid_car_ids:
+                new_k.append(k)
+                new_v.append(v)
+        prof["car_to_club"]["keys"] = new_k
+        prof["car_to_club"]["values"] = new_v
+        
+    return prof
+
+def wipe_and_replace_profile(source_prof, target_prof):
+    """
+    API 1:1 Overwrite logic. Completely wipes target data and inserts source data.
+    """
+    print("[API] 🔧 Wiping Target data and injecting Clone data...")
+    # Keep the basic identity so the target's nickname remains intact
+    identity_keys = ["profile", "location_id"]
+    identity_data = {k: target_prof.get(k) for k in identity_keys if k in target_prof}
+    
+    # Fully overwrite with the snapshot JSON
+    new_target_prof = source_prof.copy()
+    
+    # Inject Target identity back in
+    new_target_prof.update(identity_data)
+    
+    # Run the deep checker and return the safe profile
+    return validate_and_repair_profile(new_target_prof)
+
 async def get_profile(client, email, pwd, dev, carx="", is_target=False):
     payload = {"project": "STREET", "username": email, "password": pwd, "deviceId": dev, "deviceUniqueId": dev}
     r = await client.post(f"{BASE_AUTH}/login", json=payload)
     
     if r.status_code != 200 and is_target:
         reg_r = await client.post(f"{BASE_AUTH}/register", json=payload)
-        
         if reg_r.status_code != 200:
             raise Exception(f"CarX Registration Failed: {reg_r.text}")
             
@@ -78,9 +151,8 @@ async def execute_clone_from_snapshot(profile_url: str, tgt_email: str, tgt_pass
         cont_b, h_b = await get_profile(client, tgt_email, tgt_pass, tgt_dev, carx="", is_target=True)
         prof_b = decrypt_payload(cont_b["compressed_data"])
 
-        identity = {k: prof_b.get(k) for k in ["profile", "tutorial_state", "location_id", "current_car_id"] if k in prof_b}
-        prof_b.update(prof_a)
-        prof_b.update(identity)
+        # ---> APPLY WIPE & REPLACE LOGIC <---
+        prof_b = wipe_and_replace_profile(prof_a, prof_b)
         
         cont_b["compressed_data"] = encrypt_payload_strict(prof_b)
         cont_b["lastSyncTime"] = int(time.time())
@@ -100,9 +172,8 @@ async def execute_clone_dynamic(src_email, src_pass, src_dev, src_carx, tgt_emai
         cont_b, h_b = await get_profile(client, tgt_email, tgt_pass, tgt_dev, carx="", is_target=True)
         prof_b = decrypt_payload(cont_b["compressed_data"])
 
-        identity = {k: prof_b.get(k) for k in ["profile", "tutorial_state", "location_id", "current_car_id"] if k in prof_b}
-        prof_b.update(prof_a)
-        prof_b.update(identity)
+        # ---> APPLY WIPE & REPLACE LOGIC <---
+        prof_b = wipe_and_replace_profile(prof_a, prof_b)
         
         cont_b["compressed_data"] = encrypt_payload_strict(prof_b)
         cont_b["lastSyncTime"] = int(time.time())
