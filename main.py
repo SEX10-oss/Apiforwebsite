@@ -1,12 +1,12 @@
 # main.py
 import time
-import uuid
 import secrets
 import httpx
 import json
 import base64
 import gzip
 import orjson
+import uuid  # 💡 Fixed: Added missing import to prevent NameError on dev_id generations
 from fastapi import FastAPI, Depends, HTTPException, Security, status, Response
 from fastapi.security.api_key import APIKeyHeader
 from contextlib import asynccontextmanager
@@ -71,6 +71,10 @@ class InjectLevelRequest(BaseModel):
     email: EmailStr = Field(..., description="Target Account Email")
     password: str = Field(..., description="Target Account Password")
     xp_amount: Optional[int] = Field(93060, description="The absolute XP value to set for max level")
+
+class InjectUnlocksRequest(BaseModel):
+    email: EmailStr = Field(..., description="Target Account Email")
+    password: str = Field(..., description="Target Account Password")
 
 class InjectNitroRequest(BaseModel):
     email: EmailStr = Field(..., description="Target Account Email")
@@ -267,7 +271,6 @@ async def api_inject_resources(payload: InjectResourcesRequest):
 
 @app.post("/api/v1/inject/level", dependencies=[Depends(verify_api_key)])
 async def api_inject_level(payload: InjectLevelRequest):
-    """Directly overrides the player's total account experience value to max (93060)."""
     dev_id = uuid.uuid4().hex
     try:
         async with httpx.AsyncClient(http2=True, timeout=60.0) as client:
@@ -286,6 +289,61 @@ async def api_inject_level(payload: InjectLevelRequest):
             if r_up.status_code != 200:
                 raise Exception(r_up.text)
             return {"status": "success", "message": f"Account experience set directly to {payload.xp_amount} (Max Level)."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/v1/inject/unlocks", dependencies=[Depends(verify_api_key)])
+async def api_inject_unlocks(payload: InjectUnlocksRequest):
+    """Unlocks all customization assets (Banners, Avatars, Frames) and Real Estates (Apartments)."""
+    dev_id = uuid.uuid4().hex
+    try:
+        async with httpx.AsyncClient(http2=True, timeout=60.0) as client:
+            client.headers.update({"User-Agent": "UnityPlayer/6000.0.64f1", "X-Project": "STREET"})
+            cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
+            profile = carx_cloner.decrypt_payload(cont["compressed_data"])
+            
+            # 1. Unlock Customizations (Banners, Avatars, Frames 1-16 + Wheel Rim)
+            bp_rewards = profile.setdefault("battle_pass_event_rewards", {})
+            keys_list = bp_rewards.setdefault("keys", [])
+            
+            for i in range(1, 17):
+                for item_type in ["banner", "avatar", "frame"]:
+                    item_key = f"unlock_{item_type}_{i}"
+                    if item_key not in keys_list:
+                        keys_list.append(item_key)
+            
+            if "unlock_wheel_rim_1380" not in keys_list:
+                keys_list.append("unlock_wheel_rim_1380")
+            
+            # 2. Unlock Real Estates (Apartments & Houses across the map)
+            real_estates = profile.setdefault("real_estates", {})
+            
+            individual_apts = [
+                "apartment_01", "apartment_51", "apartment_95", 
+                "apartment_industrial_SP", "apartment_midtown_SP", 
+                "apartment_midtown2_SP", "apartment_midtown3_SP"
+            ]
+            for apt in individual_apts:
+                real_estates.setdefault(apt, {})["is_bought"] = True
+                
+            grouped_estates = {
+                "Industrial_apartment": 6,
+                "Midtown_apartment": 12,
+                "Mountain_apartment": 19,
+                "Prigorod_apartment": 7,
+                "Speedway_apartment": 3
+            }
+            for prefix, count in grouped_estates.items():
+                for i in range(1, count + 1):
+                    real_estates.setdefault(f"{prefix}_{i}", {})["is_bought"] = True
+
+            profile["lastSyncTime"] = int(time.time())
+            cont["compressed_data"] = carx_cloner.encrypt_payload_strict(profile)
+            r_up = await client.post(f"{carx_cloner.BASE_SYNC}/profiles", json=cont, headers=h)
+            if r_up.status_code != 200:
+                raise Exception(r_up.text)
+                
+            return {"status": "success", "message": "All Banners, Avatars, Frames, and Map Real Estate Apartments unlocked."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
