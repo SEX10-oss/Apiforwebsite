@@ -6,7 +6,7 @@ import json
 import base64
 import gzip
 import orjson
-import uuid  # 💡 Fixed: Added missing import to prevent NameError on dev_id generations
+import uuid 
 from fastapi import FastAPI, Depends, HTTPException, Security, status, Response
 from fastapi.security.api_key import APIKeyHeader
 from contextlib import asynccontextmanager
@@ -72,7 +72,11 @@ class InjectLevelRequest(BaseModel):
     password: str = Field(..., description="Target Account Password")
     xp_amount: Optional[int] = Field(93060, description="The absolute XP value to set for max level")
 
-class InjectUnlocksRequest(BaseModel):
+class InjectCustomsRequest(BaseModel):
+    email: EmailStr = Field(..., description="Target Account Email")
+    password: str = Field(..., description="Target Account Password")
+
+class InjectRealEstateRequest(BaseModel):
     email: EmailStr = Field(..., description="Target Account Email")
     password: str = Field(..., description="Target Account Password")
 
@@ -95,7 +99,6 @@ async def health_check():
 
 @app.post("/api/v1/create-account", dependencies=[Depends(verify_api_key)])
 async def api_create_account(payload: CreateAccountRequest):
-    # Query your actual 'accounts' table
     package = await db.get_account_by_id(payload.account_id)
     if not package:
         raise HTTPException(status_code=404, detail="Selected package ID not found in database accounts table.")
@@ -292,9 +295,9 @@ async def api_inject_level(payload: InjectLevelRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/api/v1/inject/unlocks", dependencies=[Depends(verify_api_key)])
-async def api_inject_unlocks(payload: InjectUnlocksRequest):
-    """Unlocks all customization assets (Banners, Avatars, Frames) and Real Estates (Apartments)."""
+@app.post("/api/v1/inject/customs", dependencies=[Depends(verify_api_key)])
+async def api_inject_customs(payload: InjectCustomsRequest):
+    """Unlocks all customization assets (Banners, Avatars, Frames) and Wheel Rims."""
     dev_id = uuid.uuid4().hex
     try:
         async with httpx.AsyncClient(http2=True, timeout=60.0) as client:
@@ -302,7 +305,6 @@ async def api_inject_unlocks(payload: InjectUnlocksRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            # 1. Unlock Customizations (Banners, Avatars, Frames 1-16 + Wheel Rim)
             bp_rewards = profile.setdefault("battle_pass_event_rewards", {})
             keys_list = bp_rewards.setdefault("keys", [])
             
@@ -314,8 +316,27 @@ async def api_inject_unlocks(payload: InjectUnlocksRequest):
             
             if "unlock_wheel_rim_1380" not in keys_list:
                 keys_list.append("unlock_wheel_rim_1380")
+
+            profile["lastSyncTime"] = int(time.time())
+            cont["compressed_data"] = carx_cloner.encrypt_payload_strict(profile)
+            r_up = await client.post(f"{carx_cloner.BASE_SYNC}/profiles", json=cont, headers=h)
+            if r_up.status_code != 200:
+                raise Exception(r_up.text)
+                
+            return {"status": "success", "message": "All Banners, Avatars, Frames, and Wheel Rims unlocked."}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/v1/inject/realestate", dependencies=[Depends(verify_api_key)])
+async def api_inject_realestate(payload: InjectRealEstateRequest):
+    """Unlocks all Real Estates (Apartments & Houses) across the map."""
+    dev_id = uuid.uuid4().hex
+    try:
+        async with httpx.AsyncClient(http2=True, timeout=60.0) as client:
+            client.headers.update({"User-Agent": "UnityPlayer/6000.0.64f1", "X-Project": "STREET"})
+            cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
+            profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            # 2. Unlock Real Estates (Apartments & Houses across the map)
             real_estates = profile.setdefault("real_estates", {})
             
             individual_apts = [
@@ -343,7 +364,7 @@ async def api_inject_unlocks(payload: InjectUnlocksRequest):
             if r_up.status_code != 200:
                 raise Exception(r_up.text)
                 
-            return {"status": "success", "message": "All Banners, Avatars, Frames, and Map Real Estate Apartments unlocked."}
+            return {"status": "success", "message": "All Map Real Estate Apartments unlocked."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
