@@ -19,8 +19,8 @@ import carx_cloner
 from config import WORKER_SECRET_TOKEN
 
 # Supabase catalogs
-CAR_LIST_URL = "https://rznrrywtfiyehwkfntfj.supabase.co/storage/v1/object/public/profiles/carlist.json"
-CAR_IMAGES_URL = "https://rznrrywtfiyehwkfntfj.supabase.co/storage/v1/object/public/profiles/car_images.json"
+CAR_LIST_URL = "https://kqybljxyobhlakrxcrld.supabase.co/storage/v1/object/public/Profile/carlist.json"
+CAR_IMAGES_URL = "https://kqybljxyobhlakrxcrld.supabase.co/storage/v1/object/public/Profile/car_images.json"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
