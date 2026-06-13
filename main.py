@@ -414,11 +414,13 @@ async def api_inject_maps(payload: InjectMapsRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
+            # Unlock Map Regions
             world_parts = profile.setdefault("game_world_parts", {})
             target_regions = ["industrial", "midtown", "suburb", "port", "mountain", "sunset"]
             for r in target_regions:
                 world_parts.setdefault(r, {})["unlocked"] = True
                 
+            # Complete Progression Quests
             quests = profile.setdefault("quests", {})
             map_quests = [
                 "move_to_industrial_intro_quest", "move_to_midtown_intro_quest",
@@ -429,11 +431,40 @@ async def api_inject_maps(payload: InjectMapsRequest):
                 quest_node["completed"] = True
                 quest_node["rewarded"] = True
                 
+            # Inject Shop Packs
+            shop_packs = profile.setdefault("shop_owned_packs", {})
+            shop_keys = shop_packs.setdefault("keys", [])
+            
+            new_shop_keys = [
+                "special_55", "special_78", "special_54", "special_17", "special_7",
+                "special_68", "special_39", "special_51", "special_10", "special_4",
+                "special_49", "special_3", "special_50", "special_69", "special_1",
+                "special_2", "special_43", "special_31", "special_72", "special_80",
+                "special_77", "special_76", "special_75", "special_74", "special_73",
+                "special_71", "special_70", "special_67", "special_8", "special_6",
+                "special_11", "special_16", "special_5", "special_9", "special_12",
+                "special_13", "special_14", "special_18", "special_22", "special_30",
+                "special_24", "special_27", "special_28", "special_21", "special_19",
+                "special_29", "special_20", "special_26", "special_23", "special_25",
+                "special_15", "special_32", "special_33", "special_34", "special_35",
+                "special_36", "special_37", "special_38", "special_40", "special_41",
+                "special_42", "special_44", "special_45", "special_46", "special_47",
+                "special_48", "special_52", "special_53", "special_56", "special_57",
+                "special_58", "special_59", "special_60", "special_63", "special_61",
+                "special_62", "special_64", "special_65", "special_66", "special_79",
+                "special_81", "special_game_world_part_sunset_iap_full",
+                "special_game_world_part_mountain_iap_full", "special_85", "special_86"
+            ]
+
+            for key in new_shop_keys:
+                if key not in shop_keys:
+                    shop_keys.append(key)
+
             profile["lastSyncTime"] = int(time.time())
             cont["compressed_data"] = carx_cloner.encrypt_payload_strict(profile)
             r_up = await client.post(f"{carx_cloner.BASE_SYNC}/profiles", json=cont, headers=h)
             if r_up.status_code != 200:
                 raise Exception(r_up.text)
-            return {"status": "success", "message": "Maps and regions unlocked."}
+            return {"status": "success", "message": "Maps, regions, and shop packs unlocked."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
