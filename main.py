@@ -250,23 +250,20 @@ async def api_inject_resources(payload: InjectResourcesRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            # Retrieve or create resources parent structure
+            # Exact logic from resourcestool5
             res = profile.setdefault("resources", {})
             
-            # Ensure proper sub-dictionary formatting exists for soft, hard, and experience
-            if "soft" not in res or not isinstance(res["soft"], dict):
-                res["soft"] = {"amount": 0.0}
-            if "hard" not in res or not isinstance(res["hard"], dict):
-                res["hard"] = {"amount": 0}
-            if "experience" not in res or not isinstance(res["experience"], dict):
-                res["experience"] = {"amount": 0}
+            # Ensure structures exist
+            if "soft" not in res: res["soft"] = {"amount": 0}
+            if "hard" not in res: res["hard"] = {"amount": 0}
+            if "experience" not in res: res["experience"] = {"amount": 0}
             
             if payload.silver:
-                res["soft"]["amount"] = float(res["soft"].get("amount", 0.0)) + float(payload.silver)
+                res["soft"]["amount"] = res["soft"].get("amount", 0) + float(payload.silver)
             if payload.gold:
-                res["hard"]["amount"] = int(res["hard"].get("amount", 0)) + int(payload.gold)
+                res["hard"]["amount"] = res["hard"].get("amount", 0) + int(payload.gold)
             if payload.xp:
-                res["experience"]["amount"] = int(res["experience"].get("amount", 0)) + int(payload.xp)
+                res["experience"]["amount"] = res["experience"].get("amount", 0) + int(payload.xp)
                 
             profile["lastSyncTime"] = int(time.time())
             cont["compressed_data"] = carx_cloner.encrypt_payload_strict(profile)
@@ -287,10 +284,8 @@ async def api_inject_level(payload: InjectLevelRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            # Retrieve or create resources parent structure
             res = profile.setdefault("resources", {})
-            if "experience" not in res or not isinstance(res["experience"], dict):
-                res["experience"] = {"amount": 0}
+            if "experience" not in res: res["experience"] = {"amount": 0}
                 
             res["experience"]["amount"] = payload.xp_amount
             
@@ -314,6 +309,7 @@ async def api_inject_customs(payload: InjectCustomsRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
+            # Exact logic from resourcestool5
             bp_rewards = profile.setdefault("battle_pass_event_rewards", {})
             keys_list = bp_rewards.setdefault("keys", [])
             
@@ -346,8 +342,8 @@ async def api_inject_realestate(payload: InjectRealEstateRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
+            # Exact logic from resourcestool5
             real_estates = profile.setdefault("real_estates", {})
-            
             individual_apts = [
                 "apartment_01", "apartment_51", "apartment_95", 
                 "apartment_industrial_SP", "apartment_midtown_SP", 
@@ -388,6 +384,7 @@ async def api_inject_nitro(payload: InjectNitroRequest):
             garage = profile["cars"]["items"] if ("cars" in profile and "items" in profile["cars"]) else profile
             
             current_timestamp = int(time.time())
+            # Exact logic from resourcestool5
             if payload.car_id:
                 if payload.car_id not in garage:
                     raise HTTPException(status_code=404, detail="Target car not found in garage.")
@@ -423,51 +420,34 @@ async def api_inject_maps(payload: InjectMapsRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            # Unlock Map Regions
+            # Exact logic from resourcestool5
             world_parts = profile.setdefault("game_world_parts", {})
             target_regions = ["industrial", "midtown", "suburb", "port", "mountain", "sunset"]
             for r in target_regions:
                 world_parts.setdefault(r, {})["unlocked"] = True
                 
-            # Complete Progression Quests
             quests = profile.setdefault("quests", {})
             map_quests = [
                 "move_to_industrial_intro_quest", "move_to_midtown_intro_quest",
-                "move_to_suburb_intro_quest", "move_to_mountain_intro_quest", "move_to_port_intro_quest"
+                "move_to_suburb_intro_quest", "move_to_mountain_intro_quest", 
+                "move_to_port_intro_quest", "move_to_sunset_intro_quest"
             ]
             for mq in map_quests:
                 quest_node = quests.setdefault(mq, {})
                 quest_node["completed"] = True
                 quest_node["rewarded"] = True
                 
-            # Inject Shop Packs
             shop_packs = profile.setdefault("shop_owned_packs", {})
             shop_keys = shop_packs.setdefault("keys", [])
             
-            new_shop_keys = [
-                "special_55", "special_78", "special_54", "special_17", "special_7",
-                "special_68", "special_39", "special_51", "special_10", "special_4",
-                "special_49", "special_3", "special_50", "special_69", "special_1",
-                "special_2", "special_43", "special_31", "special_72", "special_80",
-                "special_77", "special_76", "special_75", "special_74", "special_73",
-                "special_71", "special_70", "special_67", "special_8", "special_6",
-                "special_11", "special_16", "special_5", "special_9", "special_12",
-                "special_13", "special_14", "special_18", "special_22", "special_30",
-                "special_24", "special_27", "special_28", "special_21", "special_19",
-                "special_29", "special_20", "special_26", "special_23", "special_25",
-                "special_15", "special_32", "special_33", "special_34", "special_35",
-                "special_36", "special_37", "special_38", "special_40", "special_41",
-                "special_42", "special_44", "special_45", "special_46", "special_47",
-                "special_48", "special_52", "special_53", "special_56", "special_57",
-                "special_58", "special_59", "special_60", "special_63", "special_61",
-                "special_62", "special_64", "special_65", "special_66", "special_79",
-                "special_81", "special_game_world_part_sunset_iap_full",
-                "special_game_world_part_mountain_iap_full", "special_85", "special_86"
+            map_iap_packs = [
+                "special_game_world_part_sunset_iap_full",
+                "special_game_world_part_mountain_iap_full"
             ]
 
-            for key in new_shop_keys:
-                if key not in shop_keys:
-                    shop_keys.append(key)
+            for pack in map_iap_packs:
+                if pack not in shop_keys:
+                    shop_keys.append(pack)
 
             profile["lastSyncTime"] = int(time.time())
             cont["compressed_data"] = carx_cloner.encrypt_payload_strict(profile)
