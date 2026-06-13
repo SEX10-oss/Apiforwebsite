@@ -197,7 +197,7 @@ async def api_get_master_catalog():
 async def api_inject_car(payload: InjectCarRequest):
     dev_id = uuid.uuid4().hex
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(http2=True, timeout=60.0) as client:
             r_list = await client.get(CAR_LIST_URL)
             if r_list.status_code != 200:
                 raise Exception("Failed to retrieve master vehicle catalog.")
@@ -250,18 +250,24 @@ async def api_inject_resources(payload: InjectResourcesRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            res = profile.get("resources", {})
+            # Retrieve or create resources parent structure
+            res = profile.setdefault("resources", {})
+            
+            # Ensure proper sub-dictionary formatting exists for soft, hard, and experience
+            if "soft" not in res or not isinstance(res["soft"], dict):
+                res["soft"] = {"amount": 0.0}
+            if "hard" not in res or not isinstance(res["hard"], dict):
+                res["hard"] = {"amount": 0}
             if "experience" not in res or not isinstance(res["experience"], dict):
                 res["experience"] = {"amount": 0}
             
             if payload.silver:
-                res.setdefault("soft", {"amount": 0.0})["amount"] += float(payload.silver)
+                res["soft"]["amount"] = float(res["soft"].get("amount", 0.0)) + float(payload.silver)
             if payload.gold:
-                res.setdefault("hard", {"amount": 0})["amount"] += int(payload.gold)
+                res["hard"]["amount"] = int(res["hard"].get("amount", 0)) + int(payload.gold)
             if payload.xp:
-                res["experience"]["amount"] = res["experience"].get("amount", 0) + int(payload.xp)
+                res["experience"]["amount"] = int(res["experience"].get("amount", 0)) + int(payload.xp)
                 
-            profile["resources"] = res
             profile["lastSyncTime"] = int(time.time())
             cont["compressed_data"] = carx_cloner.encrypt_payload_strict(profile)
             
@@ -281,10 +287,13 @@ async def api_inject_level(payload: InjectLevelRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            res = profile.get("resources", {})
-            res["experience"] = {"amount": payload.xp_amount}
+            # Retrieve or create resources parent structure
+            res = profile.setdefault("resources", {})
+            if "experience" not in res or not isinstance(res["experience"], dict):
+                res["experience"] = {"amount": 0}
+                
+            res["experience"]["amount"] = payload.xp_amount
             
-            profile["resources"] = res
             profile["lastSyncTime"] = int(time.time())
             cont["compressed_data"] = carx_cloner.encrypt_payload_strict(profile)
             
