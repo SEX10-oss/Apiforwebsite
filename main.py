@@ -282,11 +282,10 @@ async def api_inject_level(payload: InjectLevelRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            res = profile.setdefault("resources", {})
-            if "experience" not in res: res["experience"] = {"amount": 0}
-                
-            res["experience"]["amount"] = payload.xp_amount
+            res = profile.get("resources", {})
+            res["experience"] = {"amount": payload.xp_amount}
             
+            profile["resources"] = res
             profile["lastSyncTime"] = int(time.time())
             cont["compressed_data"] = carx_cloner.encrypt_payload_strict(profile)
             
