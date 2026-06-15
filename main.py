@@ -7,6 +7,7 @@ import base64
 import gzip
 import orjson
 import uuid 
+import os
 from fastapi import FastAPI, Depends, HTTPException, Security, status, Response
 from fastapi.security.api_key import APIKeyHeader
 from contextlib import asynccontextmanager
@@ -250,10 +251,7 @@ async def api_inject_resources(payload: InjectResourcesRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            # Exact logic from resourcestool5
             res = profile.setdefault("resources", {})
-            
-            # Ensure structures exist
             if "soft" not in res: res["soft"] = {"amount": 0}
             if "hard" not in res: res["hard"] = {"amount": 0}
             if "experience" not in res: res["experience"] = {"amount": 0}
@@ -309,7 +307,6 @@ async def api_inject_customs(payload: InjectCustomsRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            # Exact logic from resourcestool5
             bp_rewards = profile.setdefault("battle_pass_event_rewards", {})
             keys_list = bp_rewards.setdefault("keys", [])
             
@@ -342,7 +339,6 @@ async def api_inject_realestate(payload: InjectRealEstateRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            # Exact logic from resourcestool5
             real_estates = profile.setdefault("real_estates", {})
             individual_apts = [
                 "apartment_01", "apartment_51", "apartment_95", 
@@ -384,7 +380,6 @@ async def api_inject_nitro(payload: InjectNitroRequest):
             garage = profile["cars"]["items"] if ("cars" in profile and "items" in profile["cars"]) else profile
             
             current_timestamp = int(time.time())
-            # Exact logic from resourcestool5
             if payload.car_id:
                 if payload.car_id not in garage:
                     raise HTTPException(status_code=404, detail="Target car not found in garage.")
@@ -420,12 +415,41 @@ async def api_inject_maps(payload: InjectMapsRequest):
             cont, h = await carx_cloner.get_profile(client, payload.email, payload.password, dev_id)
             profile = carx_cloner.decrypt_payload(cont["compressed_data"])
             
-            # Exact logic from resourcestool5
+            # 1. Unlock Map Regions
             world_parts = profile.setdefault("game_world_parts", {})
             target_regions = ["industrial", "midtown", "suburb", "port", "mountain", "sunset"]
             for r in target_regions:
                 world_parts.setdefault(r, {})["unlocked"] = True
                 
+            # --- FIXED: Inject Club Structures & Map Locations ---
+            clubs_node = profile.setdefault("clubs", {})
+            loc_registry = profile.setdefault("locations", {}).setdefault("default", {}).setdefault("location_objects_set", {})
+            loc_keys = loc_registry.setdefault("keys", [])
+            
+            clubs_to_add = [
+                "club_white_tigers", "club_chimeras", "club_pitons", "club_drift_united",
+                "club_burnout_rangers", "club_pythons", "club_speedline_syndicate",
+                "club_streethunters", "club_falcons_outlaws", "club_savage", 
+                "club_hyper_sonic", "club_arctic_outlaws", "club_grip_masters", 
+                "club_spitfire", "club_21_tribe", "club_road_runner", 
+                "club_black_lotus", "club_western_sierra", "club_speedstar_energy"
+            ]
+            
+            for club in clubs_to_add:
+                # Add to Progress Tracker
+                if club not in clubs_node:
+                    clubs_node[club] = {
+                        "cars": {"keys": []},
+                        "available_races": {"keys": []},
+                        "complete_races": {},
+                        "car_statistics": {"keys": [], "values": []}
+                    }
+                # Add to Map Display Registry
+                if club not in loc_keys:
+                    loc_keys.append(club)
+            # -----------------------------------------------------
+
+            # 2. Bypass Progression Quests
             quests = profile.setdefault("quests", {})
             map_quests = [
                 "move_to_industrial_intro_quest", "move_to_midtown_intro_quest",
@@ -437,6 +461,7 @@ async def api_inject_maps(payload: InjectMapsRequest):
                 quest_node["completed"] = True
                 quest_node["rewarded"] = True
                 
+            # 3. Inject Shop Packs
             shop_packs = profile.setdefault("shop_owned_packs", {})
             shop_keys = shop_packs.setdefault("keys", [])
             
@@ -449,11 +474,12 @@ async def api_inject_maps(payload: InjectMapsRequest):
                 if pack not in shop_keys:
                     shop_keys.append(pack)
 
+            # 4. Upload
             profile["lastSyncTime"] = int(time.time())
             cont["compressed_data"] = carx_cloner.encrypt_payload_strict(profile)
             r_up = await client.post(f"{carx_cloner.BASE_SYNC}/profiles", json=cont, headers=h)
             if r_up.status_code != 200:
                 raise Exception(r_up.text)
-            return {"status": "success", "message": "Maps, regions, and shop packs unlocked."}
+            return {"status": "success", "message": "Maps, regions, clubs, and shop packs unlocked."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
